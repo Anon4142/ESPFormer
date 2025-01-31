@@ -2,11 +2,10 @@ import torch
 from torch import nn
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from esp import EspAttention  # Import new attention mechanisms
-from dif import MultiHeadDifAttention
-from vanilla import MultiHeadVanillaAttention
-
-# import fourier_layer_cuda
+from attentions.esp import EspAttention  # Import new attention mechanisms
+from attentions.dif import MultiHeadDifAttention
+from attentions.vanilla import MultiHeadVanillaAttention
+from attentions.sinkhorn import SinkAttention
 
 # helpers
 def pair(t):
@@ -36,10 +35,9 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.,
-                 attention_type='learnable', interp=None):
+                 attention_type='learnable', max_iter=1, eps=1, interp=None):
         """
         :param attention_type: 'frozen' for FEspAttention, 'learnable' for LEspAttention
         :param interp: Interpolation matrix for LEspAttention
@@ -49,6 +47,7 @@ class Transformer(nn.Module):
 
         #attention_cls = MultiHeadVanillaAttention #VANILLA ATTENTION
         attention_cls = MultiHeadDifAttention #DIFFERENTIAL ATTENTION
+        attention_cls = SinkAttention #SINKFORMER
         #attention_cls = EspAttention
 
         learnable = False if attention_type=='frozen' else True
@@ -60,6 +59,7 @@ class Transformer(nn.Module):
                 # PreNorm(dim, attention_cls(dim, num_heads=heads, attn_drop=dropout)),
                 # PreNorm(dim, attention_cls(dim, heads=heads)), 
                 PreNorm(dim, attention_cls(num_hidden=dim, num_heads=heads, seq_len=seq_length, d_k=dim_head)), #for DIFFERENTIAL
+                #PreNorm(dim, attention_cls(dim, heads = heads, dim_head = dim_head, dropout = dropout, max_iter=max_iter, eps=eps)), #FOR SINKFORMER
                 #PreNorm(dim, attention_cls(num_hidden=dim, num_heads=heads, d_k=dim_head)), #for VANILLA
 
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
@@ -69,7 +69,7 @@ class Transformer(nn.Module):
     def forward(self, x):
         attn_weights = []
         for attn, ff in self.layers:
-            attn_x, attn_matrix = attn(x) #FOR VANILLA and DIFFERENTIAL
+            attn_x, attn_matrix = attn(x) 
             x = attn_x + x
             x = ff(x) + x
             attn_weights.append(attn_matrix.cpu().detach().numpy())

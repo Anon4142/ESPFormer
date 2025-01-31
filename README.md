@@ -18,10 +18,16 @@ This repository contains the experiments and implementation code for **ESPFormer
 
 The repository is organized as follows:
 
+- **`attentions/`**: Contains the various attention modules
+
 - **`catsdogs/`**: Image classification experiment on cats and dogs  
   - **`examples/`**: contains train/test datasets (will need to be downloaded manually)
   - **`trainer_cats_and_dogs.py`**: Loads the `.npy` subset indices if the `use_subset` argument is `True`.  
   - **`one_expe.py`**: Entry script to run a single experiment. 
+
+- **`mnist/`**: Image classification on MNIST
+  - Dataset will need to be downloaded manually
+  - **`one_expe_mnist.py`**: Entry script to run a single experiment. 
   
 ## Running the Experiments
 ### Cats and Dogs
