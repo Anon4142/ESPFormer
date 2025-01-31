@@ -1,6 +1,6 @@
 # ESPFormer: Doubly-Stochastic Attention with Expected Sliced Transport Plans
 
-This repository contains our experiments and implementation code for **ESPFormer: Doubly-Stochastic Attention with Expected Sliced Transport Plans**.
+This repository contains the experiments and implementation code for **ESPFormer: Doubly-Stochastic Attention with Expected Sliced Transport Plans**.
 
 <p align="center">
   <img src="figures/ESPFormer.png" alt="ESPFormer" />
@@ -11,8 +11,8 @@ This repository contains our experiments and implementation code for **ESPFormer
 1. **Create and activate a virtual environment**
 
    ```bash
-   python3.12 -m venv venv
-   source venv/bin/activate #venv\Scripts\activate on Windows
+   conda create -n esp python=3.11
+   conda activate esp
    pip install -r requirements.txt
 ## Repository Structure
 
