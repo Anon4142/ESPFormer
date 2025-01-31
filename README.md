@@ -32,6 +32,8 @@ Datasets will need to be downloaded manually. The repository is organized as fol
    
    - **`nlp-tutorial/`**: 
    - **`set_transformer/`**: 
+   - **`point_cloud_transformer/`**: 
+   
   
 ## Running the Experiments
 - Run each experiment from their respective directories.
