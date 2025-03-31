@@ -24,10 +24,17 @@ def main(args):
         tokenizer = TOKENIZER_CLASSES[args.tokenizer]()
         tokenizer = Tokenizer(tokenizer=tokenizer, vocab_file=args.vocab_file)
     # Build DataLoader
-    train_dataset = create_examples(args, tokenizer, mode='train')
-    test_dataset = create_examples(args, tokenizer, mode='test')
-    train_test_dataset = torch.utils.data.ConcatDataset([train_dataset, test_dataset])
-    train_dataset, test_dataset = torch.utils.data.random_split(train_test_dataset, [40000, 10000])
+    if args.dataset == "tweet_eval":
+        # Use the provided splits for tweet_eval
+        train_dataset = create_examples(args, tokenizer, mode='train')
+        test_dataset = create_examples(args, tokenizer, mode='test')
+    else:
+        # For other datasets (e.g., imdb), combine and re-split as before
+        train_dataset = create_examples(args, tokenizer, mode='train')
+        test_dataset = create_examples(args, tokenizer, mode='test')
+        train_test_dataset = torch.utils.data.ConcatDataset([train_dataset, test_dataset])
+        train_dataset, test_dataset = torch.utils.data.random_split(train_test_dataset, [40000, 10000])
+    
     print('train dataset of size %d' % len(train_dataset))
     print('test dataset of size %d' % len(test_dataset))
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -54,6 +61,7 @@ def main(args):
         losses = np.asarray([train_loss_array, val_loss_array, train_accuracy_array, val_accuracy_array])
         np.save(save_adr, losses)
 
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--dataset', default='imdb', type=str, help='dataset')
@@ -66,7 +74,7 @@ parser.add_argument('--pretrained_model', default='wiki.model', type=str,
 parser.add_argument('--output_model_prefix', default='model', type=str, help='output model name prefix')
 # Input parameters
 parser.add_argument('--batch_size', default=32, type=int, help='batch size')
-parser.add_argument('--max_seq_len', default=512, type=int, help='the maximum size of the input sequence')
+parser.add_argument('--max_seq_len', default=512, type=int, help='the maximum size of the input sequence') #512 for IMDB, tweets are much shorter than movie review though
 # Train parameters
 parser.add_argument('--epochs', default=15, type=int, help='the number of epochs')
 parser.add_argument('--lr', default=1e-4, type=float, help='learning rate')
@@ -81,6 +89,10 @@ parser.add_argument('--ffn_hidden', default=1024, type=int, help='the dimension 
 parser.add_argument('--save_dir', default='results', type=str, help='save dir')
 parser.add_argument("--n_it", type=int, default=3)
 parser.add_argument("--seed", type=int, default=0)
+
+#New
+parser.add_argument("--attention_type", type=str, default='esp', choices=['esp', 'dif', 'vanilla', 'sink'])
+
 args = parser.parse_args()
 
 

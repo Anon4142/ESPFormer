@@ -9,7 +9,7 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from attentions.esp import Esp
+from attentions.esp import SoftSort_p2, GammaAggregator, Esp
 
 
 
@@ -42,79 +42,15 @@ class Embedding(nn.Module):
         x = F.relu(self.bn2(self.conv2(x)))
         return x
 
-
-class GammaAggregator(nn.Module):
-    def __init__(self, mode="mean", num_heads=None, num_slices=None, temperature=0.1):
-        super(GammaAggregator, self).__init__()
-        self.mode = mode
-        self.temperature = temperature
-
-        if mode == "learnable_manual":
-            if num_heads is None or num_slices is None:
-                raise ValueError("num_heads and num_slices must be provided for learnable_manual mode.")
-            self.weights = nn.Parameter(torch.randn(num_heads, num_slices))  # Shape: [H, L]
-        elif mode == "closed_form":
-            pass 
-        elif mode not in ["mean", "learnable_manual"]:
-            raise ValueError(f"Unsupported mode: {mode}")
-
-    def forward(self, Gamma, x=None, y=None):
-        if self.mode == "mean":
-            return torch.mean(Gamma, dim=2)  # Mean over slices
-        elif self.mode == "learnable_manual":
-            return self.learnable_manual_solution(Gamma)
-        elif self.mode == "closed_form":
-            return self.closed_form_solution(Gamma, x, y)
-        else:
-            raise ValueError(f"Unsupported aggregation mode: {self.mode}")
-
-    def learnable_manual_solution(self, Gamma):
-
-        normalized_weights = F.softmax(self.weights, dim=-1)  # Shape: [H, L]
-        normalized_weights = normalized_weights.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)  # Shape: [1, H, L, 1, 1]
-        Gamma_weighted = Gamma * normalized_weights
-        return Gamma_weighted.sum(dim=2)
-
-    def closed_form_solution(self, Gamma, x=None, y=None):
-
-        if x is None or y is None:
-            raise ValueError("For closed_form mode, x and y must be provided.")
-        cost = torch.cdist(x, y, p=2)
-        swds = (cost.unsqueeze(2) * Gamma).sum(dim=(-1, -2)) 
-        min_swds = swds.min(dim=-1, keepdim=True).values  
-        exp_swds = torch.exp(-self.temperature * (swds - min_swds)) 
-        weights = exp_swds / exp_swds.sum(dim=-1, keepdim=True)  
-        Gamma_weighted = Gamma * weights.unsqueeze(-1).unsqueeze(-1)
-        return Gamma_weighted.sum(dim=2)  # Sum over slices, shape: [B, H, N, N]
-
-
-class SoftSort_p2(torch.nn.Module):
-    def __init__(self, tau=1e-3, hard=False):
-        super(SoftSort_p2, self).__init__()
-        self.hard = hard
-        self.tau = tau
-
-    def forward(self, scores: Tensor):
-        scores = scores.transpose(3,2) # Shape: B x H x L x N
-        scores = scores.unsqueeze(-1)  # Shape: B x H x L x N x 1
-        sorted_scores, _ = scores.sort(dim=3, descending=False )  # Shape: B x H x L x N x 1
-        pairwise_diff = ((scores.transpose(4, 3) - sorted_scores) ** 2).neg() / self.tau
-        P_hat = pairwise_diff.softmax(dim=-1)
-        if self.hard:
-            P = torch.zeros_like(P_hat, device=P_hat.device)
-            P.scatter_(-1, P_hat.topk(1, -1)[1], value=1)
-            P_hat = (P - P_hat).detach() + P_hat 
-        return P_hat.squeeze(-1)
-
 class SA(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0., interp=None, learnable=True, agg_mode="closed_form", temperature=.1, qkv_bias=False):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0., interp=None, temperature=0.1, qkv_bias=False):
         super().__init__()
         inner_dim = dim_head * heads
         project_out = not (heads == 1 and dim_head == dim)
 
         self.heads = heads
         self.scale = dim_head ** -0.5
-        self.esp = Esp(d_in=dim_head, heads=heads, interp=interp, agg_mode=agg_mode, temperature=temperature)
+        self.esp = Esp(d_in=dim_head, heads=heads, interp=interp, temperature=temperature)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=qkv_bias)
 

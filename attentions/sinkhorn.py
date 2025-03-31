@@ -6,9 +6,6 @@ from einops.layers.torch import Rearrange
 use_cuda = torch.cuda.is_available()
 dtype    = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
 dtypeint = torch.cuda.LongTensor if use_cuda else torch.LongTensor
-# Adapted from https://github.com/gpeyre/SinkhornAutoDiff
-# and from https://github.com/dfdazac/wassdistance/blob/master/layers.py
-
 class SinkhornDistance(nn.Module):
 
     def __init__(self, eps, max_iter, reduction='none'):
@@ -95,15 +92,25 @@ class SinkAttention(nn.Module):
             nn.Dropout(dropout)
         ) if project_out else nn.Identity()
 
-    def forward(self, x):
-        qkv = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
+    def forward(self, x, attn_mask=None):
+        # x: (batch_size, seq_len, dim)
+        qkv = self.to_qkv(x).chunk(3, dim=-1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
 
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-        #
+        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale  # (b, h, seq_len, seq_len)
+
+        # If a key padding mask is provided, apply it.
+        if attn_mask is not None:
+            # If mask is 2D (batch_size, seq_len), expand it to (batch_size, seq_len, seq_len)
+            if attn_mask.dim() == 2:
+                attn_mask = attn_mask.unsqueeze(1).expand(-1, x.size(1), -1)
+            # Unsqueeze mask for the heads dimension and apply it
+            dots = dots.masked_fill(attn_mask.unsqueeze(1), float('-inf'))
+
+        # Process dots for Sinkhorn attention
         dots_former_shape = dots.shape
         dots = dots.view(-1, dots_former_shape[2], dots_former_shape[3])
-        attn = self.sink(dots)[0]
+        attn = self.sink(dots)[0] #
         attn = attn * attn.shape[-1]
         attn = attn.view(dots_former_shape)
         out = torch.matmul(attn, v)

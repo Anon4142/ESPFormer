@@ -42,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_model_prefix', default='model',          type=str, help='output model name prefix')
     # Input parameters
     parser.add_argument('--batch_size',     default=32,   type=int,   help='batch size')
-    parser.add_argument('--max_seq_len',    default=512,  type=int,   help='the maximum size of the input sequence')
+    parser.add_argument('--max_seq_len',    default=512,  type=int,   help='the maximum size of the input sequence') #512 for IMDB, 128 for tweetEval
     # Train parameters
     parser.add_argument('--epochs',         default=7,   type=int,   help='the number of epochs')
     parser.add_argument('--lr',             default=1e-4, type=float, help='learning rate')

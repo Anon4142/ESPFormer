@@ -10,12 +10,9 @@ import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=0)
-parser.add_argument("--lr", type=float, default=0.0005)
-parser.add_argument("--attention_type", type=str, default='frozen', choices=['frozen', 'learnable'],
-                    help="Choose between frozen or learnable attention")
-parser.add_argument("--agg_mode", type=str, default="mean", choices=["mean", "learnable_manual", "closed_form"],
-                    help="Choose aggregation mode for attention mechanism")
-parser.add_argument("--temperature", type=float, default=0.1,
+parser.add_argument("--lr", type=float, default=0.002)
+parser.add_argument("--attention_type", type=str, default='esp', choices=['esp', 'dif', 'vanilla', 'sink'])
+parser.add_argument("--temperature", type=float, default=0.,
                     help="Temperature parameter for closed-form aggregation")
 parser.add_argument("--gpu", type=int, default=0, help="GPU device to use (0, 1, 2, or 3)")
 args = parser.parse_args()
@@ -91,7 +88,7 @@ def main(N_EPOCHS=45, heads=1, mlp_dim=128, lr=lr, depth=1,
     save_adr = f"{save_adr}_ps_{ps}_{attention_type}_{agg_mode}"
     os.makedirs(save_adr, exist_ok=True)
 
-    # Define model and optimizer
+    #Shallow VIT
     model = ViT_only_Att(
         image_size=28, patch_size=ps, num_classes=10, channels=1,
         dim=128, depth=depth, heads=heads, mlp_dim=mlp_dim,

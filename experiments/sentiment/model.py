@@ -1,73 +1,15 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from attentions.sinkhorn import SinkhornDistance
+from torch import Tensor
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 
-class ScaledDotProductAttention(nn.Module):
-    def __init__(self, d_k):
-        super(ScaledDotProductAttention, self).__init__()
-        self.d_k = d_k
-
-    def forward(self, q, k, v, attn_mask, n_it=1):
-        # |q| : (batch_size, n_heads, q_len, d_k), |k| : (batch_size, n_heads, k_len, d_k), |v| : (batch_size, n_heads, v_len, d_v)
-        # |attn_mask| : (batch_size, n_heads, seq_len(=q_len), seq_len(=k_len))
-        
-        attn_score = torch.matmul(q, k.transpose(-1, -2)) / np.sqrt(self.d_k)
-        attn_score.masked_fill_(attn_mask, -1e9)
-        attn_score_shape = attn_score.shape
-        attn_weights_soft = nn.Softmax(dim=-1)(attn_score)
-        # |attn_score| : (batch_size, n_heads, q_len, k_len)
-        attn_score = attn_score.view(-1, attn_score_shape[2], attn_score_shape[3])
-        sink = SinkhornDistance(1, max_iter=n_it)
-        attn_weights = sink(attn_score)[0]
-
-        attn_weights = attn_weights * attn_weights.shape[-1]
-
-        attn_weights = attn_weights.view(attn_score_shape)
-        #
-        # |attn_weights| : (batch_size, n_heads, q_len, k_len)
-        
-        output = torch.matmul(attn_weights, v)
-        # |output| : (batch_size, n_heads, q_len, d_v)
-        
-        return output, attn_weights
-
-class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, n_heads, n_it=1):
-        super(MultiHeadAttention, self).__init__()
-        self.n_heads = n_heads
-        self.d_k = self.d_v = d_model//n_heads
-        self.WV = nn.Linear(d_model, d_model)
-
-        self.WQ = nn.Linear(d_model, d_model)
-        self.WK = nn.Linear(d_model, d_model)
-
-        self.n_it = n_it
-        self.scaled_dot_product_attn = ScaledDotProductAttention(self.d_k)
-        self.linear = nn.Linear(n_heads * self.d_v, d_model)
-        
-    def forward(self, Q, K, V, attn_mask):
-        # |Q| : (batch_size, q_len, d_model), |K| : (batch_size, k_len, d_model), |V| : (batch_size, v_len, d_model)
-        # |attn_mask| : (batch_size, seq_len(=q_len), seq_len(=k_len))
-        batch_size = Q.size(0)
-        
-        q_heads = self.WQ(Q).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2) 
-        k_heads = self.WK(K).view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2) 
-        v_heads = self.WV(V).view(batch_size, -1, self.n_heads, self.d_v).transpose(1, 2) 
-        # |q_heads| : (batch_size, n_heads, q_len, d_k), |k_heads| : (batch_size, n_heads, k_len, d_k), |v_heads| : (batch_size, n_heads, v_len, d_v)
-        
-        attn_mask = attn_mask.unsqueeze(1).repeat(1, self.n_heads, 1, 1)
-        # |attn_mask| : (batch_size, n_heads, seq_len(=q_len), seq_len(=k_len))
-        attn, attn_weights = self.scaled_dot_product_attn(q_heads, k_heads, v_heads, attn_mask, n_it=self.n_it)
-        # |attn| : (batch_size, n_heads, q_len, d_v)
-        # |attn_weights| : (batch_size, n_heads, q_len, k_len)
-
-        attn = attn.transpose(1, 2).contiguous().view(batch_size, -1, self.n_heads * self.d_v)
-        # |attn| : (batch_size, q_len, n_heads * d_v)
-        output = self.linear(attn)
-        # |output| : (batch_size, q_len, d_model)
-
-        return output, attn_weights
+#Attentions
+from attentions.esp import EspAttention
+from attentions.dif import MultiHeadDifAttention
+from attentions.vanilla import MultiHeadVanillaAttention
+from attentions.sinkhorn import SinkAttention
 
 class PositionWiseFeedForwardNetwork(nn.Module):
     def __init__(self, d_model, d_ff):
@@ -88,10 +30,27 @@ class PositionWiseFeedForwardNetwork(nn.Module):
         return output
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model, n_heads, p_drop, d_ff, n_it=1):
+    def __init__(self, d_model, n_heads, p_drop, d_ff, n_it=1, print_attention=False, attention_type = "esp"):
         super(EncoderLayer, self).__init__()
 
-        self.mha = MultiHeadAttention(d_model, n_heads, n_it=n_it)
+        #HERE IS WHERE WE VARY THE ATTENTION
+        #ESPAttention
+        if (attention_type == "esp"):
+            self.mha = EspAttention(d_model,d_model//n_heads, n_heads) 
+
+        #Vanilla Attention
+        elif (attention_type == "vanilla"):
+            self.mha = MultiHeadVanillaAttention(d_model, n_heads=n_heads, d_k=d_model//n_heads)
+
+        #Diff Attention; seq_len is max sequence length; max # of tokens in batch; -1 as dummy input since its correctly calculated within the class
+        elif (attention_type == "dif"):
+            self.mha = MultiHeadDifAttention(d_model, n_heads, -1, d_model // n_heads)
+
+        #Sink Attention
+        elif (attention_type == "sink"): #use S=3
+            self.mha = SinkAttention(d_model, n_heads, d_model//n_heads) 
+
+        
         self.dropout1 = nn.Dropout(p_drop)
         self.layernorm1 = nn.LayerNorm(d_model, eps=1e-6)
         
@@ -103,7 +62,9 @@ class EncoderLayer(nn.Module):
         # |inputs| : (batch_size, seq_len, d_model)
         # |attn_mask| : (batch_size, seq_len, seq_len)
         
-        attn_outputs, attn_weights = self.mha(inputs, inputs, inputs, attn_mask)
+        #ATTENTION INPUT HERE
+        attn_outputs, attn_weights = self.mha(inputs, attn_mask) 
+
         attn_outputs = self.dropout1(attn_outputs)
         attn_outputs = self.layernorm1(inputs + attn_outputs)
         # |attn_outputs| : (batch_size, seq_len(=q_len), d_model)
@@ -135,7 +96,8 @@ class TransformerEncoder(nn.Module):
     >>> encoder(inp)
     """
     
-    def __init__(self, vocab_size, seq_len, d_model=512, n_layers=6, n_heads=8, p_drop=0.1, d_ff=2048, pad_id=0, n_it=1):
+    def __init__(self, vocab_size, seq_len, d_model=512, n_layers=6, n_heads=8, p_drop=0.1, d_ff=2048, pad_id=0,
+                 n_it=1, print_attention=False, attention_type = "esp", dataset = "tweet_eval"):
         super(TransformerEncoder, self).__init__()
         self.pad_id = pad_id
         self.sinusoid_table = self.get_sinusoid_table(seq_len+1, d_model) # (seq_len+1, d_model)
@@ -143,9 +105,16 @@ class TransformerEncoder(nn.Module):
         # layers
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.pos_embedding = nn.Embedding.from_pretrained(self.sinusoid_table, freeze=True)
-        self.layers = nn.ModuleList([EncoderLayer(d_model, n_heads, p_drop, d_ff, n_it=n_it) for _ in range(n_layers)])
+        self.layers = nn.ModuleList([EncoderLayer(d_model, n_heads, p_drop, d_ff, n_it=n_it,
+                                                  print_attention=print_attention, attention_type = attention_type) for _ in range(n_layers)])
         # layers to classify
-        self.linear = nn.Linear(d_model, 2)
+        
+        #For Tweet-Eval (3 classes)
+        if dataset == "tweet_eval":
+            self.linear = nn.Linear(d_model, 3)
+        else: #for IMDB
+            self.linear = nn.Linear(d_model, 2)
+
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, inputs):
@@ -153,7 +122,7 @@ class TransformerEncoder(nn.Module):
         positions = torch.arange(inputs.size(1), device=inputs.device, dtype=inputs.dtype).repeat(inputs.size(0), 1) + 1
         position_pad_mask = inputs.eq(self.pad_id)
         positions.masked_fill_(position_pad_mask, 0)
-        # |positions| : (batch_size, seq_len)
+        # |positions| : (batch_size, seq_len); we expand the mask in the attention modules
 
         outputs = self.embedding(inputs) + self.pos_embedding(positions)
         # |outputs| : (batch_size, seq_len, d_model)

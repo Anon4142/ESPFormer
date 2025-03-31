@@ -37,7 +37,7 @@ class FeedForward(nn.Module):
 
 class Transformer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.,
-                 attention_type='learnable', max_iter=1, eps=1, interp=None):
+                 attention_type='esp', max_iter=3, eps=1, interp=None):
         """
         :param attention_type: 'frozen' for FEspAttention, 'learnable' for LEspAttention
         :param interp: Interpolation matrix for LEspAttention
@@ -45,26 +45,39 @@ class Transformer(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList([])
 
-        #attention_cls = MultiHeadVanillaAttention #VANILLA ATTENTION
-        attention_cls = MultiHeadDifAttention #DIFFERENTIAL ATTENTION
-        attention_cls = SinkAttention #SINKFORMER
-        #attention_cls = EspAttention
-
-        learnable = False if attention_type=='frozen' else True
-
         #seq_len is for DifAttention # of patches = 224^2/16^2 + 1 (+1 for CLS token)
         seq_length = 197
-        for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                # PreNorm(dim, attention_cls(dim, num_heads=heads, attn_drop=dropout)),
-                # PreNorm(dim, attention_cls(dim, heads=heads)), 
-                PreNorm(dim, attention_cls(num_hidden=dim, num_heads=heads, seq_len=seq_length, d_k=dim_head)), #for DIFFERENTIAL
-                #PreNorm(dim, attention_cls(dim, heads = heads, dim_head = dim_head, dropout = dropout, max_iter=max_iter, eps=eps)), #FOR SINKFORMER
-                #PreNorm(dim, attention_cls(num_hidden=dim, num_heads=heads, d_k=dim_head)), #for VANILLA
 
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-    ]))
+        if (attention_type == "esp"):
+            for _ in range(depth):
+                self.layers.append(nn.ModuleList([
+                    PreNorm(dim, EspAttention(dim, heads=heads)),  #dk inferred
+                    PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+            ]))
 
+        #Vanilla Attention
+        elif (attention_type == "vanilla"):
+            for _ in range(depth):
+                self.layers.append(nn.ModuleList([
+                    PreNorm(dim, MultiHeadVanillaAttention(num_hidden=dim, num_heads=heads, d_k=dim_head)), #for VANILLA
+                    PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+                ]))
+
+        #Diff Attention; seq_len is max sequence length; max # of tokens in batch; -1 as dummy input since its correctly calculated within the class
+        elif (attention_type == "dif"):
+            for _ in range(depth):
+                self.layers.append(nn.ModuleList([
+                    PreNorm(dim, MultiHeadDifAttention(num_hidden=dim, num_heads=heads, seq_len=seq_length, d_k=dim_head)), #for DIFFERENTIAL
+                    PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+                ]))
+
+        #Sink Attention
+        else: #attention_type == "sink"
+            for _ in range(depth):
+                self.layers.append(nn.ModuleList([
+                    PreNorm(dim, SinkAttention(dim, heads = heads, dim_head = dim_head, dropout = dropout, max_iter=max_iter, eps=eps)), #FOR SINKFORMER
+                    PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+                ]))     
 
     def forward(self, x):
         attn_weights = []
@@ -78,7 +91,7 @@ class Transformer(nn.Module):
 class ViT(nn.Module):
     def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim,
                  pool='cls', channels=3, dim_head=64, dropout=0., emb_dropout=0.,
-                 attention_type='learnable', interp=None):
+                 attention_type='esp', interp=None):
         super().__init__()
         image_height, image_width = pair(image_size)
         patch_height, patch_width = pair(patch_size)

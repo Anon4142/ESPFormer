@@ -20,7 +20,7 @@ import wandb
 #     name="name"
 # )
 
-def main(save_adr='esp.npy', save_model_folder='models/', lr=3e-5, epochs=300, seed=0, subset_perc=100, use_subset = False, accumulation_steps=1):
+def main(save_adr='esp.npy', save_model_folder='models/', lr=3e-5, epochs=300, seed=0, subset_perc=100, use_subset = False, attention_type ="esp", accumulation_steps=1):
     # Ensure the save directory exists
     os.makedirs(save_model_folder, exist_ok=True)
     save_model = os.path.join(save_model_folder, 'espformer.pth')
@@ -133,6 +133,7 @@ def main(save_adr='esp.npy', save_model_folder='models/', lr=3e-5, epochs=300, s
         dim_head=64,
         dropout=0.,
         emb_dropout=0.,
+        attention_type = attention_type
     ).to(device)
     
     if num_gpus > 1:
